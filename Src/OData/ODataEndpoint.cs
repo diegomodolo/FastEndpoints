@@ -15,6 +15,14 @@ public abstract class ODataEndpoint<TEntity> : Endpoint<ODataQueryOptions<TEntit
     /// </summary>
     protected abstract void Setup();
 
+    /// <summary>
+    /// Execute the OData endpoint with different request and response types.
+    /// </summary>
+    /// <param name="req"></param>
+    /// <param name="ct"></param>
+    /// <typeparam name="TRequest"></typeparam>
+    /// <typeparam name="TResponse"></typeparam>
+    /// <returns></returns>
     public abstract Task<TResponse> ExecuteAsync<TRequest, TResponse>(TRequest req, CancellationToken ct)
         where TResponse : class, IQueryable
         where TRequest : ODataQueryOptions<TEntity>;
