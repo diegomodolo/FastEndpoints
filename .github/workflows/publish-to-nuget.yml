@@ -7,6 +7,9 @@ on:
                 description: 'Target environment'
                 required: true
                 default: 'development'
+            version:
+                description: 'Nuget packaged version'
+                required: true
 
 jobs:
   deploy:
@@ -38,8 +41,9 @@ jobs:
         run: dotnet pack -c Release
 
       - name: Publish To Nuget
-        run: dotnet nuget push "Src/**/*.nupkg" -k $NUGET_AUTH_TOKEN -s https://nuget.pkg.github.com/nectar-sistemas/index.json
+        run: dotnet nuget push "Src/**/*.nupkg" --skip-duplicate -k $NUGET_AUTH_TOKEN -s https://nuget.pkg.github.com/nectar-sistemas/index.json
         env:
           NUGET_AUTH_TOKEN: ${{ secrets.NUGET_API_KEY }}
+
 
 
