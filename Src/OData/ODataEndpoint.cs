@@ -15,6 +15,10 @@ public abstract class ODataEndpoint<TEntity> : Endpoint<ODataQueryOptions<TEntit
     /// </summary>
     protected abstract void Setup();
 
+    public abstract Task<TResponse> ExecuteAsync<TRequest, TResponse>(TRequest req, CancellationToken ct)
+        where TResponse : class, IQueryable
+        where TRequest : ODataQueryOptions<TEntity>;
+
     public sealed override void Configure()
     {
         RequestBinder(new ODataBinder());
