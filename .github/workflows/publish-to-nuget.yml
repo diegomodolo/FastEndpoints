@@ -1,9 +1,12 @@
 name: Publish Nuget Package
 
 on:
-  push:
-    tags:
-      - v*
+    workflow_dispatch:
+        inputs:
+            environment:
+                description: 'Target environment'
+                required: true
+                default: 'development'
 
 jobs:
   deploy:
@@ -35,7 +38,7 @@ jobs:
         run: dotnet pack -c Release
 
       - name: Publish To Nuget
-        run: dotnet nuget push "Src/**/*.nupkg" -k $NUGET_AUTH_TOKEN -s https://api.nuget.org/v3/index.json
+        run: dotnet nuget push "Src/**/*.nupkg" -k $NUGET_AUTH_TOKEN -s https://nuget.pkg.github.com/nectar-sistemas/index.json
         env:
           NUGET_AUTH_TOKEN: ${{ secrets.NUGET_API_KEY }}
 
@@ -46,3 +49,4 @@ jobs:
           draft: false
           name: ${{ github.ref_name }} Release
           body_path: Src/Library/changelog.md
+
