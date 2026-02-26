@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
+using System.Text.Json.Serialization;
 using FluentValidation;
 using FluentValidation.Internal;
 using Microsoft.AspNetCore.Antiforgery;
@@ -7,7 +9,6 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Metadata;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ApiExplorer;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
@@ -21,6 +22,7 @@ namespace FastEndpoints;
 /// <summary>
 /// provides extensions to easily bootstrap fastendpoints in the asp.net middleware pipeline
 /// </summary>
+[UnconditionalSuppressMessage("aot", "IL2026"), UnconditionalSuppressMessage("aot", "IL3050")]
 public static class MainExtensions
 {
     /// <summary>
@@ -59,15 +61,16 @@ public static class MainExtensions
         if (app is not IEndpointRouteBuilder routeBuilder)
             throw new InvalidCastException($"Cannot cast [{nameof(app)}] to IEndpointRouteBuilder");
 
-        MapFastEndpoints(routeBuilder, configAction);
+        routeBuilder.MapFastEndpoints(configAction);
 
         return app;
     }
 
     public static IEndpointRouteBuilder MapFastEndpoints(this IEndpointRouteBuilder app, Action<Cfg>? configAction = null)
     {
-        Cfg.ServiceResolver = app.ServiceProvider.GetRequiredService<IServiceResolver>();
+        ServiceResolver.Instance = app.ServiceProvider.GetRequiredService<IServiceResolver>();
         var jsonOpts = app.ServiceProvider.GetService<IOptions<JsonOptions>>()?.Value.SerializerOptions;
+        Cfg.SerOpts.AspNetCoreOptions = jsonOpts; // store reference to original for IResult types
         Cfg.SerOpts.Options = jsonOpts is not null
                                   ? new(jsonOpts) //make a copy to avoid configAction modifying the global JsonOptions
                                   : Cfg.SerOpts.Options;
@@ -133,10 +136,7 @@ public static class MainExtensions
 
                 foreach (var verb in def.Verbs)
                 {
-                    var hb = app.MapMethods(
-                        finalRoute,
-                        [verb],
-                        (HttpContext ctx, [FromServices] IEndpointFactory factory) => RequestHandler.Invoke(ctx, factory));
+                    var hb = app.MapMethods(finalRoute, [verb], () => FeRequestHandler.Instance);
 
                     hb.WithName(
                         Cfg.EpOpts.NameGenerator(
@@ -146,7 +146,7 @@ public static class MainExtensions
                                 def.Routes.Length > 1 ? routeNum : null,
                                 def.EndpointTags?.Count > 0 ? def.EndpointTags[0] : null))); //user can override this via Options(x=>x.WithName(...))
 
-                    hb.WithMetadata(def);
+                    hb.WithMetadata(def.EndpointMetadata is not null ? [def, ..def.EndpointMetadata] : [def]);
 
                     if (def.AttribsToForward is not null)
                         hb.WithMetadata(def.AttribsToForward.ToArray());
@@ -183,9 +183,7 @@ public static class MainExtensions
             }
         }
 
-        app.ServiceProvider.GetRequiredService<ILogger<StartupTimer>>().EndpointsRegistered(
-            totalEndpointCount,
-            endpoints.Stopwatch.ElapsedMilliseconds.ToString("N0"));
+        app.ServiceProvider.GetRequiredService<ILogger<StartupTimer>>().EndpointsRegistered(totalEndpointCount, endpoints.Stopwatch.ElapsedMilliseconds.ToString("N0"));
 
         endpoints.Stopwatch.Stop();
 
@@ -209,17 +207,14 @@ public static class MainExtensions
 
         CommandExtensions.TestHandlersPresent = app.ServiceProvider.GetService<TestCommandHandlerMarker>() is not null;
 
+        app.MapGet("_test_url_cache_", () => TypedResults.Ok(IEndpoint.GetTestUrlCache()))
+           .ExcludeFromDescription();
+
         return app;
     }
 
     internal static string BuildRoute(this StringBuilder builder, int epVersion, string route, string? prefixOverride)
     {
-        // {rPrfix}/{p}{ver}/{route}
-        // mobile/v1/customer/retrieve
-
-        // {rPrfix}/{route}/{p}{ver}
-        // mobile/customer/retrieve/v1
-
         if (Cfg.EpOpts.RoutePrefix is not null && prefixOverride != string.Empty)
         {
             builder.Append('/')
@@ -227,48 +222,69 @@ public static class MainExtensions
                    .Append('/');
         }
 
-        if (Cfg.VerOpts.PrependToRoute is true)
-            AppendVersion(builder, epVersion, trailingSlash: true);
+        if (Cfg.VerOpts.RouteTemplate is not null && (epVersion > 0 || Cfg.VerOpts.DefaultVersion != 0))
+        {
+            var index = route.IndexOf(Cfg.VerOpts.RouteTemplate, StringComparison.Ordinal);
 
-        if (builder.Length > 0 && route.StartsWith('/'))
-            builder.Remove(builder.Length - 1, 1);
+            if (index < 0)
+                throw new InvalidOperationException($"The route [{route}], doesn't contain the versioning template pattern [{Cfg.VerOpts.RouteTemplate}]!");
 
-        builder.Append(route);
+            SetVersion(builder, Cfg.VerOpts.RouteTemplate, index, route, epVersion);
+        }
+        else
+        {
+            // {rPrfix}/{p}{ver}/{route}
+            // mobile/v1/customer/retrieve
 
-        if (Cfg.VerOpts.PrependToRoute is not true)
-            AppendVersion(builder, epVersion, trailingSlash: false);
+            if (Cfg.VerOpts.PrependToRoute is true)
+                AppendVersion(builder, epVersion, trailingSlash: true);
+
+            if (builder.Length > 0 && route.StartsWith('/'))
+                builder.Length--;
+
+            builder.Append(route);
+
+            // {rPrfix}/{route}/{p}{ver}
+            // mobile/customer/retrieve/v1
+
+            if (Cfg.VerOpts.PrependToRoute is not true)
+                AppendVersion(builder, epVersion, trailingSlash: false);
+        }
 
         var final = builder.ToString();
         builder.Clear();
 
         return final;
 
+        static void SetVersion(StringBuilder builder, string routeTemplate, int indexPos, string route, int epVersion)
+        {
+            if (builder.Length > 0 && builder[^1] == '/' && route.StartsWith('/'))
+                builder.Length--;
+
+            builder.Append(route.AsSpan(0, indexPos))                              //add up to beginning of routeTemplate
+                   .Append(Cfg.VerOpts.Prefix ?? "v")                              //add version prefix
+                   .Append(epVersion > 0 ? epVersion : Cfg.VerOpts.DefaultVersion) //add version number
+                   .Append(route.AsSpan(indexPos + routeTemplate.Length));         //add the part after routeTemplate
+        }
+
         static void AppendVersion(StringBuilder builder, int epVersion, bool trailingSlash)
         {
             var prefix = Cfg.VerOpts.Prefix ?? "v";
+            var version = epVersion > 0
+                              ? epVersion
+                              : Cfg.VerOpts.DefaultVersion;
 
-            if (epVersion > 0)
-            {
-                if (builder.Length > 0 && builder[^1] != '/')
-                    builder.Append('/');
+            if (version == 0)
+                return;
 
-                builder.Append(prefix)
-                       .Append(epVersion);
+            if (builder.Length > 0 && builder[^1] != '/')
+                builder.Append('/');
 
-                if (trailingSlash)
-                    builder.Append('/');
-            }
-            else if (Cfg.VerOpts.DefaultVersion != 0)
-            {
-                if (builder.Length > 0 && builder[^1] != '/')
-                    builder.Append('/');
+            builder.Append(prefix)
+                   .Append(version);
 
-                builder.Append(prefix)
-                       .Append(Cfg.VerOpts.DefaultVersion);
-
-                if (trailingSlash)
-                    builder.Append('/');
-            }
+            if (trailingSlash)
+                builder.Append('/');
         }
     }
 
@@ -366,87 +382,90 @@ public static class MainExtensions
             });
     }
 
-    static void AddSwaggerDefaults(this RouteHandlerBuilder b, EndpointDefinition ep)
+    extension(RouteHandlerBuilder b)
     {
-        //clearing all produces metadata before proceeding - https://github.com/FastEndpoints/FastEndpoints/issues/833
-        //this is possibly related to .net 9+ only, but we'll be covering all bases this way.
-        b.Add(
-            eb =>
-            {
-                for (var i = eb.Metadata.Count - 1; i >= 0; i--)
+        void AddSwaggerDefaults(EndpointDefinition ep)
+        {
+            //clearing all produces metadata before proceeding - https://github.com/FastEndpoints/FastEndpoints/issues/833
+            //this is possibly related to .net 9+ only, but we'll be covering all bases this way.
+            b.Add(
+                eb =>
                 {
-                    if (eb.Metadata[i] is IProducesResponseTypeMetadata)
-                        eb.Metadata.RemoveAt(i);
-                }
-            });
-
-        var isPlainTextRequest = Types.IPlainTextRequest.IsAssignableFrom(ep.ReqDtoType);
-
-        if (isPlainTextRequest)
-        {
-            b.Accepts(ep.ReqDtoType, "text/plain", "application/json");
-            b.ProducesDeDuped(200, ep.ResDtoType, ["text/plain", "application/json"]);
-
-            return;
-        }
-
-        if (ep.ReqDtoType != Types.EmptyRequest)
-        {
-            if (ep.ReqDtoType.AllPropsAreNonJsonSourced())
-                b.Accepts(ep.ReqDtoType, "*/*");
-            else if (ep.Verbs.Any(m => m is "GET" or "HEAD" or "DELETE"))
-                b.Accepts(ep.ReqDtoType, "*/*", "application/json");
-            else
-                b.Accepts(ep.ReqDtoType, "application/json");
-        }
-
-        if (ep.ExecuteAsyncReturnsIResult)
-            b.Add(eb => ProducesMetaForResultOfResponse.AddMetadata(eb, ep.ResDtoType));
-        else
-        {
-            if (ep.ResDtoType == Types.Object || ep.ResDtoType == Types.EmptyResponse)
-                b.ProducesDeDuped(204, Types.Void, []);
-            else
-                b.ProducesDeDuped(200, ep.ResDtoType, ["application/json"]);
-        }
-
-        if (ep.AnonymousVerbs?.Length is null or 0)
-            b.ProducesDeDuped(401, Types.Void, []);
-
-        if (ep.RequiresAuthorization())
-            b.ProducesDeDuped(403, Types.Void, []);
-
-        if (Cfg.ErrOpts.ProducesMetadataType is not null && ep.ValidatorType is not null)
-            b.ProducesDeDuped(Cfg.ErrOpts.StatusCode, Cfg.ErrOpts.ProducesMetadataType, [Cfg.ErrOpts.ContentType]);
-    }
-
-    static void ProducesDeDuped(this RouteHandlerBuilder hb, int statusCode, Type type, string[] contentTypes)
-    {
-        hb.Finally(
-            b =>
-            {
-                for (var i = 0; i < b.Metadata.Count; i++)
-                {
-                    int? code = b.Metadata[i] switch
+                    for (var i = eb.Metadata.Count - 1; i >= 0; i--)
                     {
-                        IProducesResponseTypeMetadata p => p.StatusCode,
-                        IApiResponseMetadataProvider a => a.StatusCode,
-                        _ => null
-                    };
-
-                    if (code is null)
-                        continue;
-
-                    switch (statusCode)
-                    {
-                        case >= 200 and < 300 when code is >= 200 and < 300:
-                        case >= 400 and < 500 when code == statusCode:
-                            return;
+                        if (eb.Metadata[i] is IProducesResponseTypeMetadata)
+                            eb.Metadata.RemoveAt(i);
                     }
-                }
+                });
 
-                b.Metadata.Add(new DefaultProducesResponseMetadata(type, statusCode, contentTypes));
-            });
+            var isPlainTextRequest = Types.IPlainTextRequest.IsAssignableFrom(ep.ReqDtoType);
+
+            if (isPlainTextRequest)
+            {
+                b.Accepts(ep.ReqDtoType, "text/plain", "application/json");
+                b.ProducesDeDuped(200, ep.ResDtoType, ["text/plain", "application/json"]);
+
+                return;
+            }
+
+            if (ep.ReqDtoType != Types.EmptyRequest)
+            {
+                if (ep.ReqDtoType.AllPropsAreNonJsonSourced())
+                    b.Accepts(ep.ReqDtoType, "*/*");
+                else if (ep.Verbs.Any(m => m is "GET" or "HEAD" or "DELETE"))
+                    b.Accepts(ep.ReqDtoType, "*/*", "application/json");
+                else
+                    b.Accepts(ep.ReqDtoType, "application/json");
+            }
+
+            if (ep.ExecuteAsyncReturnsIResult)
+                b.Add(eb => ProducesMetaForResultOfResponse.AddMetadata(eb, ep.ResDtoType));
+            else
+            {
+                if (ep.ResDtoType == Types.Object || ep.ResDtoType == Types.EmptyResponse)
+                    b.ProducesDeDuped(204, Types.Void, []);
+                else
+                    b.ProducesDeDuped(200, ep.ResDtoType, ["application/json"]);
+            }
+
+            if (ep.AnonymousVerbs?.Length is null or 0)
+                b.ProducesDeDuped(401, Types.Void, []);
+
+            if (ep.RequiresAuthorization())
+                b.ProducesDeDuped(403, Types.Void, []);
+
+            if (Cfg.ErrOpts.ProducesMetadataType is not null && ep.ValidatorType is not null)
+                b.ProducesDeDuped(Cfg.ErrOpts.StatusCode, Cfg.ErrOpts.ProducesMetadataType, [Cfg.ErrOpts.ContentType]);
+        }
+
+        void ProducesDeDuped(int statusCode, Type type, string[] contentTypes)
+        {
+            b.Finally(
+                b1 =>
+                {
+                    for (var i = 0; i < b1.Metadata.Count; i++)
+                    {
+                        int? code = b1.Metadata[i] switch
+                        {
+                            IProducesResponseTypeMetadata p => p.StatusCode,
+                            IApiResponseMetadataProvider a => a.StatusCode,
+                            _ => null
+                        };
+
+                        if (code is null)
+                            continue;
+
+                        switch (statusCode)
+                        {
+                            case >= 200 and < 300 when code is >= 200 and < 300:
+                            case >= 400 and < 500 when code == statusCode:
+                                return;
+                        }
+                    }
+
+                    b1.Metadata.Add(new DefaultProducesResponseMetadata(type, statusCode, contentTypes));
+                });
+        }
     }
 
     static bool AllPropsAreNonJsonSourced(this Type tRequest)
@@ -456,3 +475,6 @@ public static class MainExtensions
 sealed class StartupTimer;
 
 sealed class DuplicateHandlerRegistration;
+
+[JsonSerializable(typeof(string)), JsonSerializable(typeof(IEnumerable<string>)), JsonSerializable(typeof(ErrorResponse)), JsonSerializable(typeof(ProblemDetails))]
+sealed partial class FastEndpointsSerializerContext : JsonSerializerContext;

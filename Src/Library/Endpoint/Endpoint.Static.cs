@@ -1,4 +1,4 @@
-﻿using System.Runtime.ExceptionServices;
+using System.Runtime.ExceptionServices;
 using System.Text.Json.Serialization;
 using FluentValidation.Results;
 using Microsoft.AspNetCore.Http;
@@ -8,13 +8,11 @@ namespace FastEndpoints;
 
 public abstract partial class Endpoint<TRequest, TResponse> where TRequest : notnull
 {
-    static async ValueTask<TRequest> BindRequestAsync(EndpointDefinition def,
-                                                      HttpContext ctx,
-                                                      List<ValidationFailure> failures,
-                                                      CancellationToken ct)
+    static async ValueTask<TRequest> BindRequestAsync(EndpointDefinition def, HttpContext ctx, List<ValidationFailure> failures, CancellationToken ct)
     {
-        var binder = (IRequestBinder<TRequest>)
-            (def.EpRequestBinder ??= Cfg.ServiceResolver.Resolve(typeof(IRequestBinder<TRequest>)));
+        var binder = (IRequestBinder<TRequest>)(def.EpRequestBinder ??= _tRequest.IsValueType
+                                                                            ? new RequestBinder<TRequest>() // native aot cannot instantiate value type generic binders
+                                                                            : ServiceResolver.Instance.Resolve<IRequestBinder<TRequest>>());
 
         if (def.MaxRequestSize > 0)
         {
@@ -31,6 +29,22 @@ public abstract partial class Endpoint<TRequest, TResponse> where TRequest : not
         Cfg.BndOpts.Modifier?.Invoke(req, _tRequest, binderCtx, ct);
 
         return req;
+    }
+
+    static async Task<bool> FeatureFlagTriggered(IEnumerable<IFeatureFlag> flags, IEndpoint endpoint, CancellationToken ct)
+    {
+        foreach (var flag in flags)
+        {
+            if (await flag.IsEnabledAsync(endpoint))
+                continue;
+
+            if (!endpoint.HttpContext.ResponseStarted())
+                await endpoint.HttpContext.Response.SendNotFoundAsync(ct);
+
+            return true;
+        }
+
+        return false;
     }
 
     static async Task RunPreprocessors(List<IProcessor> preProcessors,
@@ -89,10 +103,10 @@ public abstract partial class Endpoint<TRequest, TResponse> where TRequest : not
         }
     }
 
-    static Task AutoSendResponse(HttpContext ctx,
-                                 TResponse responseDto,
-                                 JsonSerializerContext? jsonSerializerContext,
-                                 CancellationToken cancellation)
+    static Task<Void> AutoSendResponse(HttpContext ctx,
+                                       TResponse responseDto,
+                                       JsonSerializerContext? jsonSerializerContext,
+                                       CancellationToken cancellation)
         => responseDto is null
                ? ctx.Response.SendNoContentAsync(cancellation)
                : ctx.Response.SendAsync(responseDto, ctx.Response.StatusCode, jsonSerializerContext, cancellation);

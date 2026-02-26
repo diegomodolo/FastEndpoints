@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <ItemGroup>
+        <Content Include="xunit.runner.json" CopyToOutputDirectory="Always" Visible="false"/>
+        <Content Remove="aot\**"/>
+        <None Remove="aot\**"/>
+    </ItemGroup>
+
+    <PropertyGroup>
+        <AotOutputPath>$(MSBuildThisFileDirectory)aot\</AotOutputPath>
+        <AotProjectPath>$(MSBuildThisFileDirectory)..\..\..\NativeAotChecker\</AotProjectPath>
+        <AotExeName Condition="$([MSBuild]::IsOSPlatform('Windows'))">NativeAotChecker.exe</AotExeName>
+        <AotExeName Condition="!$([MSBuild]::IsOSPlatform('Windows'))">NativeAotChecker</AotExeName>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="$(AotProjectPath)NativeAotChecker.csproj"/>
+        <AotSourceFiles Include="$(AotProjectPath)**\*.cs" Visible="false"/>
+    </ItemGroup>
+
+    <Target Name="PublishAotBeforeBuild"
+            BeforeTargets="BeforeBuild"
+            Inputs="@(AotSourceFiles)"
+            Outputs="$(AotOutputPath)$(AotExeName)">
+
+        <Exec Command="dotnet publish &quot;$(AotProjectPath)NativeAotChecker.csproj&quot; -c Release -o &quot;$(AotOutputPath)&quot;"
+              StandardOutputImportance="low"
+              StandardErrorImportance="high"/>
+
+        <Message Text="Published NativeAotChecker AOT binary." Importance="high"/>
+    </Target>
+
+</Project>

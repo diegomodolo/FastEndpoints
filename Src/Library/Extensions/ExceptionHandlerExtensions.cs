@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Http;
@@ -10,6 +11,7 @@ class ExceptionHandler;
 /// <summary>
 /// extensions for global exception handling
 /// </summary>
+[UnconditionalSuppressMessage("aot", "IL2026"), UnconditionalSuppressMessage("aot", "IL3050")]
 public static class ExceptionHandlerExtensions
 {
     /// <summary>

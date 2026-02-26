@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Http;
+﻿using System.Diagnostics.CodeAnalysis;
+using Microsoft.AspNetCore.Http;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using static FastEndpoints.Config;
@@ -8,6 +9,7 @@ namespace FastEndpoints;
 /// <summary>
 /// serialization options for the endpoints
 /// </summary>
+[UnconditionalSuppressMessage("aot", "IL2026"), UnconditionalSuppressMessage("aot", "IL3050")]
 public sealed class SerializerOptions
 {
     /// <summary>
@@ -74,4 +76,10 @@ public sealed class SerializerOptions
                          options: jCtx?.Options ?? SerOpts.Options,
                          contentType: SerOpts.CharacterEncoding is null ? contentType : $"{contentType}; charset={SerOpts.CharacterEncoding}",
                          cancellationToken: cancellation);
+
+    /// <summary>
+    /// the original json serializer options from the di-registered JsonOptions.
+    /// used by IResult types (like Ok&lt;T&gt;) which get their serializer options from di.
+    /// </summary>
+    internal JsonSerializerOptions? AspNetCoreOptions { get; set; }
 }

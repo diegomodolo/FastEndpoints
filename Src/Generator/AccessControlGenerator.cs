@@ -1,4 +1,4 @@
-﻿using System.Collections.Immutable;
+using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.CodeAnalysis;
@@ -12,7 +12,7 @@ namespace FastEndpoints.Generator;
 public class AccessControlGenerator : IIncrementalGenerator
 {
     const string AccessControl = "AccessControl";
-    string? _assemblyName;
+    string? _rootNamespace;
 
     // ReSharper disable once InconsistentNaming
     readonly StringBuilder b = new();
@@ -22,7 +22,7 @@ public class AccessControlGenerator : IIncrementalGenerator
         var assemblyName = initCtx.CompilationProvider.Select(static (c, _) => c.AssemblyName);
         initCtx.RegisterSourceOutput(
             assemblyName,
-            static (spc, assembly) => spc.AddSource("Allow.b.g.cs", SourceText.From(RenderBase(assembly), Encoding.UTF8)));
+            static (spc, assemblyName) => spc.AddSource("Allow.b.g.cs", SourceText.From(RenderBase(assemblyName), Encoding.UTF8)));
 
         var matches = initCtx.SyntaxProvider
                              .CreateSyntaxProvider(Qualify, Transform)
@@ -40,7 +40,7 @@ public class AccessControlGenerator : IIncrementalGenerator
         Match Transform(GeneratorSyntaxContext ctx, CancellationToken _)
         {
             //should be re-assigned on every call. do not cache!
-            _assemblyName = ctx.SemanticModel.Compilation.AssemblyName;
+            _rootNamespace = ctx.SemanticModel.Compilation.AssemblyName?.ToValidNameSpace() ?? "Assembly";
 
             return new(ctx.SemanticModel.GetDeclaredSymbol(ctx.Node.Parent!.Parent!.Parent!.Parent!), (InvocationExpressionSyntax)ctx.Node);
         }
@@ -67,7 +67,7 @@ public class AccessControlGenerator : IIncrementalGenerator
 
               using FastEndpoints;
 
-              namespace {{_assemblyName}}.Auth;
+              namespace {{_rootNamespace}}.Auth;
 
               public static partial class Allow
               {
@@ -79,7 +79,7 @@ public class AccessControlGenerator : IIncrementalGenerator
         {
             b.w(
                 $"""
-                 
+
                      /// <summary>{p.Description}</summary><remark>Generated from endpoint: <see cref="{p.Endpoint}"/></remark>
                      public const string {p.Name} = "{p.Code}";
                  """);
@@ -124,7 +124,7 @@ public class AccessControlGenerator : IIncrementalGenerator
                 var key = $"_{g.Key.ToLower()}";
                 sb.w(
                     $$"""
-                      
+
                           public static IEnumerable<string> {{g.Key}} => {{key}};
                           private static void AddTo{{g.Key}}(string permissionCode) => {{key}}.Add(permissionCode);
                           private static readonly List<string>{{key}} = new()
@@ -142,7 +142,7 @@ public class AccessControlGenerator : IIncrementalGenerator
                 }
                 sb.Remove(sb.Length - 2, 2).w(
                     """
-                    
+
                         };
 
                     """);
@@ -171,7 +171,7 @@ public class AccessControlGenerator : IIncrementalGenerator
                 {
                     sb.w(
                         $$"""
-                          
+
                                   //{{p.Name}}
                                   { "{{p.Code}}", "{{p.Description}}" },
                           """);
@@ -180,7 +180,7 @@ public class AccessControlGenerator : IIncrementalGenerator
 
             sb.w(
                 """
-                
+
                     };
                 #endregion
 
@@ -195,13 +195,13 @@ public class AccessControlGenerator : IIncrementalGenerator
              using FastEndpoints;
              using System.Reflection;
 
-             namespace {{assemblyName}}.Auth;
+             namespace {{assemblyName?.ToValidNameSpace() ?? "Assembly"}}.Auth;
 
              public static partial class Allow
              {
                  private static readonly Dictionary<string, string> _permNames = new();
                  private static readonly Dictionary<string, string> _permCodes = new();
-             
+
                  static Allow()
                  {
                      foreach (var f in typeof(Allow).GetFields(BindingFlags.Public | BindingFlags.Static).Where(t => !t.IsDefined(typeof(HideFromDocsAttribute))))
@@ -213,7 +213,7 @@ public class AccessControlGenerator : IIncrementalGenerator
                      Groups();
                      Describe();
                  }
-             
+
                  /// <summary>
                  /// implement this method to add custom permissions to the generated categories
                  /// </summary>
@@ -223,7 +223,7 @@ public class AccessControlGenerator : IIncrementalGenerator
                  /// implement this method to add descriptions to your custom permissions
                  /// </summary>
                  static partial void Describe();
-             
+
                  /// <summary>
                  /// gets a list of permission names for the given list of permission codes
                  /// </summary>
@@ -233,7 +233,7 @@ public class AccessControlGenerator : IIncrementalGenerator
                      foreach (var code in codes)
                          if (_permCodes.TryGetValue(code, out var name)) yield return name;
                  }
-             
+
                  /// <summary>
                  /// get a list of permission codes for a given list of permission names
                  /// </summary>
@@ -243,7 +243,7 @@ public class AccessControlGenerator : IIncrementalGenerator
                      foreach (var name in names)
                          if (_permNames.TryGetValue(name, out var code)) yield return code;
                  }
-             
+
                  /// <summary>
                  /// get the permission code for a given permission name
                  /// </summary>
@@ -254,7 +254,7 @@ public class AccessControlGenerator : IIncrementalGenerator
                          return code;
                      return null;
                  }
-             
+
                  /// <summary>
                  /// get the permission name for a given permission code
                  /// </summary>
@@ -265,7 +265,7 @@ public class AccessControlGenerator : IIncrementalGenerator
                          return name;
                      return null;
                  }
-             
+
                  /// <summary>
                  /// get a permission tuple using it's name. returns null if not found
                  /// </summary>
@@ -276,7 +276,7 @@ public class AccessControlGenerator : IIncrementalGenerator
                          return new(permissionName, code);
                      return null;
                  }
-             
+
                  /// <summary>
                  /// get the permission tuple using it's code. returns null if not found
                  /// </summary>
@@ -287,19 +287,19 @@ public class AccessControlGenerator : IIncrementalGenerator
                          return new(name, permissionCode);
                      return null;
                  }
-             
+
                  /// <summary>
                  /// get a list of all permission names
                  /// </summary>
                  public static IEnumerable<string> AllNames()
                      => _permNames.Keys;
-             
+
                  /// <summary>
                  /// get a list of all permission codes
                  /// </summary>
                  public static IEnumerable<string> AllCodes()
                      => _permNames.Values;
-             
+
                  /// <summary>
                  /// get a list of all the defined permissions
                  /// </summary>
@@ -323,7 +323,7 @@ public class AccessControlGenerator : IIncrementalGenerator
                         .Arguments
                         .Select(a => a.Expression)
                         .OfType<LiteralExpressionSyntax>()
-                        .Select(l => l.Token.ValueText.Sanitize());
+                        .Select(l => l.Token.ValueText.ToValidIdentifier("_"));
 
             var desc = m.Invocation.ArgumentList.OpenParenToken.TrailingTrivia.SingleOrDefault(t => t.IsKind(SyntaxKind.SingleLineCommentTrivia))
                         .ToString();

@@ -1,4 +1,4 @@
-﻿namespace FastEndpoints;
+namespace FastEndpoints;
 
 /// <summary>
 /// create custom request binders by implementing this interface. by registering a custom modelbinder for an endpoint will completely disable the
@@ -6,7 +6,8 @@
 /// endpoint.
 /// </summary>
 /// <typeparam name="TRequest">the type of the request dto</typeparam>
-public interface IRequestBinder<TRequest> where TRequest : notnull
+public interface IRequestBinder<TRequest>
+    where TRequest : notnull
 {
     /// <summary>
     /// this method will be called by the library for binding the incoming request data and return a populated request dto object.

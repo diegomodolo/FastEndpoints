@@ -1,5 +1,5 @@
 {
-  "x-generator": "NSwag v14.5.0.0 (NJsonSchema v11.4.0.0 (Newtonsoft.Json v13.0.0.0))",
+  "x-generator": "NSwag v14.6.3.0 (NJsonSchema v11.5.2.0 (Newtonsoft.Json v13.0.0.0))",
   "openapi": "3.0.0",
   "info": {
     "title": "FastEndpoints Sandbox",
@@ -1661,6 +1661,29 @@
         }
       }
     },
+    "/api/tests/command/receivers": {
+      "get": {
+        "tags": [
+          "Tests"
+        ],
+        "operationId": "TestCasesCommandBusTestReceiverEndpoint",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          }
+        }
+      }
+    },
     "/api/tests/command-handler": {
       "get": {
         "tags": [
@@ -1711,6 +1734,51 @@
           "Tests"
         ],
         "operationId": "TestCasesCommandHandlerTestGenericCmdWithoutResultEndpoint",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "format": "guid"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tests/command-handler-hashcodes": {
+      "get": {
+        "tags": [
+          "Tests"
+        ],
+        "operationId": "TestCasesCommandHandlerTestGetCommandHandlerHashCodes",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "format": "int32"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tests/scoped-service-check": {
+      "get": {
+        "tags": [
+          "Tests"
+        ],
+        "operationId": "TestCasesCommandHandlerTestScopedServiceCheckEndpoint",
         "responses": {
           "200": {
             "description": "Success",
@@ -2298,6 +2366,45 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/FastEndpointsErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/test-cases/from-cookie-binding-test/{id}": {
+      "post": {
+        "tags": [
+          "TestCases"
+        ],
+        "operationId": "TestCasesFromCookieRequestBindingTestEndpoint",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "guid"
+            }
+          },
+          {
+            "name": "someCookie",
+            "in": "cookie",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestCasesFromCookieRequestBindingTestResponse"
                 }
               }
             }
@@ -3322,6 +3429,27 @@
             "JWTBearerAuth": []
           }
         ]
+      }
+    },
+    "/api/test-cases/endpoint-metadata-reg-test": {
+      "get": {
+        "tags": [
+          "TestCases"
+        ],
+        "operationId": "TestCasesMetadataRegistrationTestEndpoint",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "integer",
+                  "format": "int32"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/test-cases/missing-claim-test/dont-throw": {
@@ -5418,6 +5546,10 @@
           }
         }
       },
+      "TestCasesCommandBusTestReceiverRequest": {
+        "type": "object",
+        "additionalProperties": false
+      },
       "TestCasesCustomRequestBinderResponse": {
         "allOf": [
           {
@@ -5470,7 +5602,8 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "name"
+          "name",
+          "meta"
         ],
         "properties": {
           "id": {
@@ -5482,6 +5615,61 @@
             "type": "string",
             "maxLength": 10,
             "minLength": 2
+          },
+          "meta": {
+            "$ref": "#/components/schemas/TestCasesDataAnnotationCompliantNestedRequest"
+          },
+          "children": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TestCasesDataAnnotationCompliantChildRequest"
+            }
+          }
+        }
+      },
+      "TestCasesDataAnnotationCompliantNestedRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "gender"
+        ],
+        "properties": {
+          "gender": {
+            "type": "string",
+            "maxLength": 10,
+            "minLength": 1
+          },
+          "age": {
+            "type": "integer",
+            "format": "int32",
+            "maximum": 150.0,
+            "minimum": 1.0
+          }
+        }
+      },
+      "TestCasesDataAnnotationCompliantChildRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "gender"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 50,
+            "minLength": 2
+          },
+          "age": {
+            "type": "integer",
+            "format": "int32",
+            "maximum": 100.0,
+            "minimum": 0.0
+          },
+          "gender": {
+            "type": "string",
+            "maxLength": 10,
+            "minLength": 1
           }
         }
       },
@@ -5748,6 +5936,23 @@
             "exclusiveMinimum": true
           }
         }
+      },
+      "TestCasesFromCookieRequestBindingTestResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "guid"
+          },
+          "cookieValue": {
+            "type": "string"
+          }
+        }
+      },
+      "TestCasesFromCookieRequestBindingTestRequest": {
+        "type": "object",
+        "additionalProperties": false
       },
       "TestCasesGlobalGenericProcessorTestRequest": {
         "type": "object",
@@ -6084,28 +6289,6 @@
       "FastEndpointsHttp": {
         "type": "integer",
         "description": "enum for specifying a http verb",
-        "x-enum-names": [
-          "GET",
-          "POST",
-          "PUT",
-          "PATCH",
-          "DELETE",
-          "HEAD",
-          "OPTIONS",
-          "CONNECT",
-          "TRACE"
-        ],
-        "x-enum-varnames": [
-          "GET",
-          "POST",
-          "PUT",
-          "PATCH",
-          "DELETE",
-          "HEAD",
-          "OPTIONS",
-          "CONNECT",
-          "TRACE"
-        ],
         "x-enumNames": [
           "GET",
           "POST",
@@ -6116,28 +6299,6 @@
           "OPTIONS",
           "CONNECT",
           "TRACE"
-        ],
-        "x-enum-descriptions": [
-          null,
-          null,
-          null,
-          null,
-          null,
-          null,
-          null,
-          null,
-          null
-        ],
-        "x-enumDescriptions": [
-          null,
-          null,
-          null,
-          null,
-          null,
-          null,
-          null,
-          null,
-          null
         ],
         "enum": [
           1,
@@ -6271,24 +6432,6 @@
       "SystemDayOfWeek": {
         "type": "integer",
         "description": "",
-        "x-enum-names": [
-          "Sunday",
-          "Monday",
-          "Tuesday",
-          "Wednesday",
-          "Thursday",
-          "Friday",
-          "Saturday"
-        ],
-        "x-enum-varnames": [
-          "Sunday",
-          "Monday",
-          "Tuesday",
-          "Wednesday",
-          "Thursday",
-          "Friday",
-          "Saturday"
-        ],
         "x-enumNames": [
           "Sunday",
           "Monday",
@@ -6297,24 +6440,6 @@
           "Thursday",
           "Friday",
           "Saturday"
-        ],
-        "x-enum-descriptions": [
-          null,
-          null,
-          null,
-          null,
-          null,
-          null,
-          null
-        ],
-        "x-enumDescriptions": [
-          null,
-          null,
-          null,
-          null,
-          null,
-          null,
-          null
         ],
         "enum": [
           0,
@@ -6397,30 +6522,10 @@
       "TestCasesQueryObjectBindingTestByteEnum": {
         "type": "integer",
         "description": "",
-        "x-enum-names": [
-          "Check",
-          "Test",
-          "AnotherCheck"
-        ],
-        "x-enum-varnames": [
-          "Check",
-          "Test",
-          "AnotherCheck"
-        ],
         "x-enumNames": [
           "Check",
           "Test",
           "AnotherCheck"
-        ],
-        "x-enum-descriptions": [
-          null,
-          null,
-          null
-        ],
-        "x-enumDescriptions": [
-          null,
-          null,
-          null
         ],
         "enum": [
           0,

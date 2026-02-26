@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -16,6 +17,8 @@ namespace FastEndpoints;
 /// <summary>
 /// represents the configuration settings of an endpoint
 /// </summary>
+[UnconditionalSuppressMessage("aot", "IL2070"), UnconditionalSuppressMessage("aot", "IL2075"), UnconditionalSuppressMessage("aot", "IL3050"),
+ UnconditionalSuppressMessage("aot", "IL2055"), UnconditionalSuppressMessage("aot", "IL2065")]
 public sealed class EndpointDefinition(Type endpointType, Type requestDtoType, Type responseDtoType)
 {
     //these can only be set from internal code but accessible for user
@@ -51,6 +54,7 @@ public sealed class EndpointDefinition(Type endpointType, Type requestDtoType, T
     public List<string>? EndpointTags { get; private set; }
     public string? FormDataContentType { get; private set; }
     public IdempotencyOptions? IdempotencyOptions { get; private set; }
+    public object[]? EndpointMetadata { get; private set; }
     public string? OverriddenRoutePrefix { get; private set; }
     public List<string>? PreBuiltUserPolicies { get; private set; }
     public Action<AuthorizationPolicyBuilder>? PolicyBuilder { get; private set; }
@@ -65,6 +69,7 @@ public sealed class EndpointDefinition(Type endpointType, Type requestDtoType, T
     internal bool ExecuteAsyncImplemented;
     bool? _execReturnsIResults;
     internal bool ExecuteAsyncReturnsIResult => _execReturnsIResults ??= ResDtoType.IsAssignableTo(Types.IResult);
+    internal readonly HashSet<IFeatureFlag> FeatureFlags = [];
     internal bool FoundDuplicateValidators;
     internal HitCounter? HitCounter { get; private set; }
     internal bool ImplementsConfigure;
@@ -296,6 +301,19 @@ public sealed class EndpointDefinition(Type endpointType, Type requestDtoType, T
     }
 
     /// <summary>
+    /// specify a feature flag to run in order to determine if this endpoint is enabled or disabled for the current request.
+    /// </summary>
+    /// <typeparam name="TFlag">type of the feature flag</typeparam>
+    /// <param name="featureName">optional name of the feature flag</param>
+    public void FeatureFlag<TFlag>(string? featureName = null) where TFlag : IFeatureFlag
+    {
+        ThrowIfLocked();
+        var flag = (IFeatureFlag)ServiceResolver.Instance.CreateSingleton(typeof(TFlag));
+        flag.Name = featureName;
+        FeatureFlags.Add(flag);
+    }
+
+    /// <summary>
     /// if this endpoint is part of an endpoint group, specify the type of the <see cref="FastEndpoints.Group" /> concrete class where the common
     /// configuration for the group is specified.
     /// </summary>
@@ -306,10 +324,8 @@ public sealed class EndpointDefinition(Type endpointType, Type requestDtoType, T
         ThrowIfLocked();
 
         if (Routes.Length == 0)
-        {
-            throw new InvalidOperationException(
-                $"Endpoint group can only be specified after the route has been configured in the [{EndpointType.FullName}] endpoint class!");
-        }
+            throw new InvalidOperationException($"Endpoint group can only be specified after the route has been configured in the [{EndpointType.FullName}] endpoint class!");
+
         new TEndpointGroup().Action(this);
     }
 
@@ -322,6 +338,16 @@ public sealed class EndpointDefinition(Type endpointType, Type requestDtoType, T
         ThrowIfLocked();
         IdempotencyOptions ??= new();
         options?.Invoke(IdempotencyOptions);
+    }
+
+    /// <summary>
+    /// register metadata objects for the endpoint. these will be auto added to the endpoint metadata collection during startup.
+    /// </summary>
+    /// <param name="metadata">the metadata to add to the endpoint</param>
+    public void Metadata(params object[] metadata)
+    {
+        ThrowIfLocked();
+        EndpointMetadata = metadata;
     }
 
     /// <summary>
@@ -473,7 +499,7 @@ public sealed class EndpointDefinition(Type endpointType, Type requestDtoType, T
 
             try
             {
-                var processor = (IProcessor)Cfg.ServiceResolver.CreateSingleton(tFinal);
+                var processor = (IProcessor)ServiceResolver.Instance.CreateSingleton(tFinal);
                 AddProcessor(order, processor, PostProcessorList, ref _postProcessorPosition);
             }
             catch (Exception ex)
@@ -535,7 +561,7 @@ public sealed class EndpointDefinition(Type endpointType, Type requestDtoType, T
 
             try
             {
-                var processor = (IProcessor)Cfg.ServiceResolver.CreateSingleton(tFinal);
+                var processor = (IProcessor)ServiceResolver.Instance.CreateSingleton(tFinal);
                 AddProcessor(order, processor, PreProcessorList, ref _preProcessorPosition);
             }
             catch (Exception ex)
@@ -561,7 +587,7 @@ public sealed class EndpointDefinition(Type endpointType, Type requestDtoType, T
 
         try
         {
-            EpRequestBinder = Cfg.ServiceResolver.CreateSingleton(tFinal);
+            EpRequestBinder = ServiceResolver.Instance.CreateSingleton(tFinal);
         }
         catch (Exception ex)
         {
@@ -650,7 +676,7 @@ public sealed class EndpointDefinition(Type endpointType, Type requestDtoType, T
     public void Summary<TRequest>(Action<EndpointSummary<TRequest>> endpointSummary) where TRequest : notnull
     {
         ThrowIfLocked();
-        var summary = EndpointSummary as EndpointSummary<TRequest> ?? new EndpointSummary<TRequest>();
+        var summary = EndpointSummary as EndpointSummary<TRequest> ?? new EndpointSummary<TRequest>(EndpointSummary);
         endpointSummary(summary);
         EndpointSummary = summary;
     }
@@ -733,7 +759,7 @@ public sealed class EndpointDefinition(Type endpointType, Type requestDtoType, T
     internal object? GetMapper()
     {
         if (_mapper is null && MapperType is not null)
-            _mapper = Cfg.ServiceResolver.CreateSingleton(MapperType);
+            _mapper = ServiceResolver.Instance.CreateSingleton(MapperType);
 
         return _mapper;
     }
@@ -743,7 +769,7 @@ public sealed class EndpointDefinition(Type endpointType, Type requestDtoType, T
     internal object? GetValidator()
     {
         if (_validator is null && ValidatorType is not null)
-            _validator = Cfg.ServiceResolver.CreateSingleton(ValidatorType);
+            _validator = ServiceResolver.Instance.CreateSingleton(ValidatorType);
 
         return _validator;
     }
@@ -752,7 +778,7 @@ public sealed class EndpointDefinition(Type endpointType, Type requestDtoType, T
     {
         try
         {
-            var processor = (IProcessor)Cfg.ServiceResolver.CreateSingleton(typeof(TProcessor));
+            var processor = (IProcessor)ServiceResolver.Instance.CreateSingleton(typeof(TProcessor));
             AddProcessor(order, processor, list, ref pos);
         }
         catch (Exception ex)

@@ -1,8 +1,8 @@
 ---
 
-## ❇️ Help Keep FastEndpoints Free & Open-Source ❇️
+## ⚠️ Sponsorship Level Critically Low ⚠️
 
-Due to the current [unfortunate state of FOSS](https://www.youtube.com/watch?v=H96Va36xbvo), please consider [becoming a sponsor](https://opencollective.com/fast-endpoints) and help us beat the odds to keep the project alive and free for everyone.
+Due to low financial backing by the community, FastEndpoints will soon be going into "Bugfix Only" mode until the situation improves. Please [join the discussion here](https://github.com/FastEndpoints/FastEndpoints/issues/1042) and help out if you can.
 
 ---
 
@@ -10,114 +10,78 @@ Due to the current [unfortunate state of FOSS](https://www.youtube.com/watch?v=H
 
 ## New 🎉
 
-<details><summary>Specify max request body size per endpoint</summary>
+<details><summary>Support for Native AOT compilation</summary>
 
-Instead of globally increasing the max request body size in Kestrel, you can now set a max body size per endpoint where necessary like so:
+FastEndpoints is now Native AOT compatible. Please see the [documentation here](https://fast-endpoints.com/docs/native-aot) on how to configure it.
+
+If you'd like to jump in head first, a fresh AOT primed starter project can be scaffolded like so:
+
+```sh
+dotnet new install FastEndpoints.TemplatePack
+dotnet new feaot -n MyProject
+```
+
+If you've not worked with AOT compilation in .NET before, it's highly recommended to read the docs linked above.
+
+</details>
+
+<details><summary>Auto generate STJ JsonSerializationContexts</summary>
+
+You no longer need to ever see a `JsonSerializerContext` thanks to the new serializer context generator in FastEndpoints. (Unless you want to that is 😉). See the documentation [here](https://fast-endpoints.com/docs/model-binding#auto-generate-stj-serializer-contexts) on how to enable it for non-AOT projects.
+
+</details>
+
+<details><summary>Distributed job processing support</summary>
+
+The job queueing functionality now has support for distributed workers that connect to the same underlying database. See the documentation [here](https://fast-endpoints.com/docs/job-queues#distributed-job-processing).
+
+</details>
+
+<details><summary>Qualify endpoints in global configurator according to endpoint level metadata</summary>
+
+You can now register any object as metadata at the endpoint level like so:
 
 ```csharp
-public override void Configure()
+sealed class SomeObject
 {
-    Post("/file-upload");
-    AllowFileUploads();
-    MaxRequestBodySize(50 * 1024 * 1024);
+    public int Id { get; set; }
+    public bool Yes { get; set; }
+}
+
+sealed class MetaDataRegistrationEndpoint : EndpointWithoutRequest
+{
+    public override void Configure()
+    {
+        Get("/test-cases/endpoint-metadata-reg-test");
+        Metadata(
+            new SomeObject { Id = 1, Yes = true },
+            new SomeObject { Id = 2, Yes = false });
+    }
 }
 ```
 
-</details>
-
-<details><summary>Customize error response builder func when using 'ProblemDetails'</summary>
-
-You can now specify a custom response builder function when doing `.UseProblemDetails()` as shown below in case you have a special requirement to use a certain shape
-for one or more of your endpoints while the rest of the endpoints use the standard response.
+and configure endpoints conditionally at startup according to the endpoint level metadata that was added by the endpoint configure method:
 
 ```csharp
 app.UseFastEndpoints(
-       c => c.Errors.UseProblemDetails(
-           p =>
-           {
-               p.ResponseBuilder = (failures, ctx, statusCode) =>
-                                   {
-                                       if (ctx.Request.Path.StartsWithSegments("/group-name"))
-                                       {
-                                           // return any shape you want to be serialized
-                                           return new
-                                           {
-                                               Errors = failures
-                                           };
-                                       }
-
-                                       // anything else will use the standard problem details.
-                                       return new ProblemDetails(failures, ctx.Request.Path, ctx.TraceIdentifier, statusCode);
-                                   };
-           }))
+       c => c.Endpoints.Configurator =
+                ep =>
+                {
+                    if (ep.EndpointMetadata?.OfType<SomeObject>().Any(s => s.Yes) is true)
+                        ep.AllowAnonymous();
+                })
 ```
 
 </details>
 
-<details><summary>Specify a request binder per group</summary>
+<details><summary>Response sending method 'NotModifiedAsync'</summary>
 
-It is now possible to register a particular open generic request binder such as the following:
-
-```csharp
-class MyBinder<TRequest> : RequestBinder<TRequest> where TRequest : notnull 
-{ 
-    public override async ValueTask<TRequest> BindAsync(BinderContext ctx, CancellationToken ct) 
-    { 
-        var req = await base.BindAsync(ctx, ct); // run the default binding logic
- 
-        if (req is MyRequest r) 
-            r.SomeValue = Guid.NewGuid().ToString(); // do whatever you like
- 
-        return req; 
-    } 
-} 
-```
-
-only for a certain group configuration, so that only endpoints of that group will have the above custom binder associated with them.
+A new response sending method has been added for sending a 304 status code response.
 
 ```csharp
-sealed class MyGroup : Group 
-{ 
-    public MyGroup() 
-    { 
-        Configure("/my-group", ep => ep.RequestBinder(typeof(MyBinder<>))); 
-    } 
-} 
-```
-
-</details>
-
-## Improvements 🚀
-
-<details><summary>SSE response standard compliance</summary>
-
-The SSE response implementation has been enhanced by making the `Id` property in `StreamItem` optional, adding an optional `Retry` property for client-side reconnection control, as well as introducing an extra `StreamItem` constructor overload for more flexibility. Additionally, the `X-Accel-Buffering: no` response header is now automatically sent to improve compatibility with reverse proxies like NGINX, ensuring streamed data is delivered without buffering. You can now do the following when doing multi-type data responses:
-
-```csharp
-yield return new StreamItem("my-event", myData, 3000);
-```
-
-</details>
-
-<details><summary>Respect app shutdown when using SSE</summary>
-
-The SSE implementation now passes the `ApplicationStopping` cancellation token to your `IAsyncEnumerable` method. This means that streaming is cancelled at least when the application host is shutting down, and also when a user provided `CancellationToken` (if provided) triggers it.
-
-```csharp
-public override async Task HandleAsync(CancellationToken ct)
+public override async Task HandleAsync(CancellationToken c)
 {
-    await Send.EventStreamAsync(GetMultiDataStream(ct), ct);
-
-    async IAsyncEnumerable<StreamItem> GetMultiDataStream([EnumeratorCancellation] CancellationToken ct)
-    {
-        // Here ct is now your user provided CancellationToken combined with the ApplicationStopping CancellationToken.
-        while (!ct.IsCancellationRequested)
-        {
-            await Task.Delay(1000, ct);
-
-            yield return new StreamItem(Guid.NewGuid(), "your-event-type", 42);
-        }
-    }
+    await Send.NotModifiedAsync();
 }
 ```
 
@@ -125,86 +89,110 @@ public override async Task HandleAsync(CancellationToken ct)
 
 ## Fixes 🪲
 
-<details><summary>Incorrect enum value for JWT security algorithm was used</summary>
+<details><summary>Index out of range exception in routeless test helpers</summary>
 
-The wrong variant (`SecurityAlgorithms.HmacSha256Signature`) was being used for creating symmetric JWTs by default.
-The default value has been changed to `SecurityAlgorithms.HmacSha256`. It's recommended to invalidate and regenerate new tokens if you've been using the default.
-
-If for some reason, you'd like to keep using `SecurityAlgorithms.HmacSha256Signature`, you can set it yourself like so:
-
-```csharp
-var token = JwtBearer.CreateToken(
-    o =>
-    {
-        o.SigningKey = ...;
-        o.SigningAlgorithm = SecurityAlgorithms.HmacSha256Signature;
-    });
-```
+The routeless integration test helpers such as `.GETAsync<>()` would throw an exception when testing an endpoint configured with the root URL `/`, which has now been fixed.
 
 </details>
 
+<details><summary>Query/Route param culture mismatch with routeless test helpers and backend</summary>
 
-<details><summary>Integration testing extensions ignoring custom header names</summary>
-
-The testing httpclient extensions were ignoring user supplied custom header names such as the following:
-
-```csharp
-[FromHeader("x-something")]
-```
-
-during the constructing of the http request message. It was instead using the DTO property name completely dismissing the custom header names.
+The routeless test helpers such as `.GETAsync<>()` would construct route/query params (of certain primitives such as `DateTime`) using the culture of the machine where the tests are being run, while the application is set up to use a different culture, the tests would fail. This has been solved by constructing route/query params for primitive/`IFormattable` types using ISO compliant invariant culture format when constructing the requests.
 
 </details>
 
-<details><summary>Integration test extensions causing 404 if grouped endpoint configured with empty string</summary>
+<details><summary>Routeless testing helpers contention issue</summary>
 
-The test helper methods were constructing the url/route of the endpoint being tested incorrectly if that endpoint belonged to a group and was configured with an empty route like so:
-
-```csharp
-sealed class MyGroup : Group 
-{ 
-    public MyGroup() 
-    { 
-        Configure("my-group", ep => ep.AllowAnonymous()); 
-    } 
-} 
- 
-sealed class Request 
-{ 
-    [QueryParam] 
-    public string Id { get; set; } 
-} 
- 
-sealed class RootEndpoint : Endpoint<Request, string> 
-{ 
-    public override void Configure() 
-    { 
-        Get(string.Empty); 
-        Group<MyGroup>(); 
-    } 
- 
-    ...
-}
-```
+The test helpers were using a regular dictionary to cache test URLs internally which could sometimes cause trouble under high load. This has been solved by switching to a concurrent dictionary.
 
 </details>
 
-<details><summary>Swagger generation failing when DTO inherits a virtual base property</summary>
+<details><summary>Source generators having trouble with special characters in project names</summary>
 
-When a base class has a virtual property that a derived class was overriding as shown below, Swagger generator was throwing an exception due an internal dictionary key duplication.
+The source generators were generating incorrect namespaces if the project name has dashes such as `My-Project.csproj` which would result in generating namespaces with dashes, which is invalid for C#.
+
+</details>
+
+<details><summary>Test collection ordering regression</summary>
+
+Due to an internal behavior change in XUnit v3, test collection ordering was being overriden by XUnit. This has been rectified by taking matters in to our own hands and bypassing XUnit's collection runner.
+
+</details>
+
+## Improvements 🚀
+
+<details><summary>Job Queues storage processing</summary>
+
+Several optimizations have been done to the job queues storage logic to reduce the number of queries in certain scenarios. Please see the breaking changes section below as one of the methods of `IJobStorageProvider` needs a minor change.
+
+</details>
+
+<details><summary>Easy access to error response content with testing helpers</summary>
+
+You can now easily inspect why a request failed when you expected it to succeed. There's now a new string property `ErrorContent` on the `TestResult` record that routeless testing helpers return.
 
 ```csharp
-public abstract class BaseDto
+[Fact]
+public async Task Get_Request_Responds_With_200_Ok()
 {
-    public virtual string Name { get; set; }
-}
+    var (rsp, res, errorContent) = await app.Client.GETAsync<MyEndpoint, MyRequest, string>(new() { ... });
 
-sealed class DerivedClass : BaseDto
-{
-    public override string Name { get; set; }
+    if (rsp.IsSuccessStatusCode)
+        Assert.True(...);
+    else
+        Assert.Fail(errorContent); //errorContent contains the error response body as a string
 }
 ```
 
 </details>
 
-## Breaking Changes ⚠️
+<details><summary>Request DTO serialization behavior of testing helpers</summary>
+
+Testing helpers such as `.POSTAsync<>()` will only serialize the request DTO in to the request body if there's at least one property on the DTO that will be bound from the JSON body. In instances where nothing should be bound from the JSON body, the request body content will be empty.
+
+</details>
+
+<details><summary>Mitigate incorrect service scoping due to user error in Command Bus</summary>
+
+If a user for whatever reason registerd command handlers as scoped services in DI themselves (when they're not supposed to), it could lead to unexpected behavior. This is no longer an issue.
+
+</details>
+
+## Minor Breaking Changes ⚠️
+
+<details><summary>New 'IJobStorageProvider.DistributedJobProcessingEnabled' property</summary>
+
+Due to adding support for distributed job processing, all storage provider implementations must now implement the following boolean property. Simply set it to `false` when not using distributed job processing like so:
+
+```cs
+sealed class JobStorageProvider : IJobStorageProvider<JobRecord>
+{
+    public bool DistributedJobProcessingEnabled => false;
+}
+```
+
+</details>
+
+<details><summary>New 'IJobStorageRecord.DequeueAfter' property</summary>
+
+Even though you only need to implement this property when using distributed job processing, it's recommended to either let all the jobs in your database run to completion before upgrading to `v8.0` and/or run a migration to set the value of `DequeueAfter` to `DateTime.MinValue` for all jobs already in the database to ensure that they get picked up properly for processing. (Even when not using distributed processing.)
+
+</details>
+
+<details><summary>'IJobStorageProvider.GetNextBatchAsync()' return type change</summary>
+
+As a result of optimizations done to the storage processing logic in job queues, your job storage provider implementation requires a minor change from:
+
+```csharp
+public Task<IEnumerable<...>> GetNextBatchAsync(...)
+```
+
+to:
+
+```csharp
+public Task<ICollection<...>> GetNextBatchAsync(...)
+```
+
+You are now required to return a materialized collection instead of an `IEnumerable<T>`.
+
+</details>

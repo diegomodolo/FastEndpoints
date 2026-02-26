@@ -63,12 +63,12 @@ public class AdminTests(Sut App) : TestBase<Sut>
 
         for (var i = 1; i <= 6; i++)
         {
-            var (rsp, res) = await client.POSTAsync<Login.Endpoint_V1, Login.Request, Login.Response>(
-                                 new()
-                                 {
-                                     UserName = "admin",
-                                     Password = "pass"
-                                 });
+            var (rsp, res, err) = await client.POSTAsync<Login.Endpoint_V1, Login.Request, Login.Response>(
+                                      new()
+                                      {
+                                          UserName = "admin",
+                                          Password = "pass"
+                                      });
 
             if (i <= 5)
             {
@@ -80,6 +80,7 @@ public class AdminTests(Sut App) : TestBase<Sut>
             {
                 i.ShouldBe(6);
                 rsp.StatusCode.ShouldBe(HttpStatusCode.TooManyRequests);
+                err.ShouldBe("Custom Error Response");
             }
         }
 
@@ -89,7 +90,7 @@ public class AdminTests(Sut App) : TestBase<Sut>
     [Fact]
     public async Task AdminLoginV2()
     {
-        var (resp, result) = await App.GuestClient.GETAsync<Login.Endpoint_V2, EmptyRequest, int>(new());
+        var (resp, result) = await App.GuestClient.GETAsync<Login.Endpoint_V2, EmptyRequest, int>(EmptyRequest.Instance);
         resp.StatusCode.ShouldBe(HttpStatusCode.OK);
         result.ShouldBe(2);
     }

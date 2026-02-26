@@ -61,6 +61,9 @@ public abstract partial class Endpoint<TRequest, TResponse> : BaseEndpoint, IEve
 
         try
         {
+            if (Definition.FeatureFlags.Count > 0 && await FeatureFlagTriggered(Definition.FeatureFlags, this, ct))
+                return;
+
             //execution stops here if a JsonException is thrown and continues at try/catch below
             req = await BindRequestAsync(Definition, HttpContext, ValidationFailures, ct);
 
@@ -95,6 +98,11 @@ public abstract partial class Endpoint<TRequest, TResponse> : BaseEndpoint, IEve
             else
                 await HandleAsync(req, ct);
 
+            if (_response is null & HttpContext.Items.TryGetValue(Constants.FastEndpointsResponse, out var res) && res is TResponse r)
+                _response = r; // HttpResponse extensions set the response in HttpContext.Items
+            else
+                HttpContext.Items[Constants.FastEndpointsResponse] = _response; // for third party libs to access the response
+
             if (!Definition.DontAutoSend && !ResponseStarted)
                 await AutoSendResponse(HttpContext, _response!, Definition.SerializerContext, ct);
 
@@ -121,8 +129,6 @@ public abstract partial class Endpoint<TRequest, TResponse> : BaseEndpoint, IEve
         finally
         {
             await RunPostProcessors(Definition.PostProcessorList, req, _response, HttpContext, edi, ValidationFailures, ct);
-
-            HttpContext.Items["FastEndpointsResponse"] = _response; //for use by idempotency libraries
 
             //throw here if an exception has been captured and a post-processor hasn't handled it.
             //without this UseDefaultExceptionHandler() or user's custom exception handling middleware becomes useless as the exception is silently swallowed.
@@ -167,39 +173,39 @@ public abstract partial class Endpoint<TRequest, TResponse> : BaseEndpoint, IEve
 
     /// <inheritdoc />
     public TService? TryResolve<TService>() where TService : class
-        => Cfg.ServiceResolver.TryResolve<TService>();
+        => ServiceResolver.Instance.TryResolve<TService>();
 
     /// <inheritdoc />
     public object? TryResolve(Type typeOfService)
-        => Cfg.ServiceResolver.TryResolve(typeOfService);
+        => ServiceResolver.Instance.TryResolve(typeOfService);
 
     /// <inheritdoc />
     public TService Resolve<TService>() where TService : class
-        => Cfg.ServiceResolver.Resolve<TService>();
+        => ServiceResolver.Instance.Resolve<TService>();
 
     /// <inheritdoc />
     public object Resolve(Type typeOfService)
-        => Cfg.ServiceResolver.Resolve(typeOfService);
+        => ServiceResolver.Instance.Resolve(typeOfService);
 
     /// <inheritdoc />
     public IServiceScope CreateScope()
-        => Cfg.ServiceResolver.CreateScope();
+        => ServiceResolver.Instance.CreateScope();
 
     /// <inheritdoc />
     public TService? TryResolve<TService>(string keyName) where TService : class
-        => Cfg.ServiceResolver.TryResolve<TService>(keyName);
+        => ServiceResolver.Instance.TryResolve<TService>(keyName);
 
     /// <inheritdoc />
     public object? TryResolve(Type typeOfService, string keyName)
-        => Cfg.ServiceResolver.TryResolve(typeOfService, keyName);
+        => ServiceResolver.Instance.TryResolve(typeOfService, keyName);
 
     /// <inheritdoc />
     public TService Resolve<TService>(string keyName) where TService : class
-        => Cfg.ServiceResolver.Resolve<TService>(keyName);
+        => ServiceResolver.Instance.Resolve<TService>(keyName);
 
     /// <inheritdoc />
     public object Resolve(Type typeOfService, string keyName)
-        => Cfg.ServiceResolver.Resolve(typeOfService, keyName);
+        => ServiceResolver.Instance.Resolve(typeOfService, keyName);
 
     /// <summary>
     /// get the value of a given route parameter by specifying the resulting type and param name.
@@ -296,7 +302,7 @@ public abstract partial class Endpoint<TRequest, TResponse> : BaseEndpoint, IEve
     /// <inheritdoc />
     public Task PublishAsync<TEvent>(TEvent eventModel, Mode waitMode = Mode.WaitForAll, CancellationToken cancellation = default)
         where TEvent : notnull
-        => Cfg.ServiceResolver.Resolve<EventBus<TEvent>>().PublishAsync(eventModel, waitMode, cancellation);
+        => ServiceResolver.Instance.Resolve<EventBus<TEvent>>().PublishAsync(eventModel, waitMode, cancellation);
 
     /// <summary>
     /// create the access/refresh token pair response with a given refresh-token service.
@@ -307,7 +313,7 @@ public abstract partial class Endpoint<TRequest, TResponse> : BaseEndpoint, IEve
     protected Task<TResponse> CreateTokenWith<TService>(string userId, Action<UserPrivileges> userPrivileges, TRequest? request = default)
         where TService : IRefreshTokenService<TResponse>
         => ((IRefreshTokenService<TResponse>)
-               Cfg.ServiceResolver.CreateInstance(typeof(TService), HttpContext.RequestServices)).CreateToken(userId, userPrivileges, false, request);
+               ServiceResolver.Instance.CreateInstance(typeof(TService), HttpContext.RequestServices)).CreateToken(userId, userPrivileges, false, request);
 
     /// <summary>
     /// retrieve the common processor state for this endpoint.

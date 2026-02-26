@@ -1,4 +1,4 @@
-﻿using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
 using System.Collections.Immutable;
@@ -17,12 +17,17 @@ public class DiscoveredTypesGenerator : IIncrementalGenerator
         "FastEndpoints.IEventHandler",
         "FastEndpoints.ICommandHandler",
         "FastEndpoints.ISummary",
+        "FastEndpoints.IJobStorageProvider<",
+        "FastEndpoints.IPreProcessor<",
+        "FastEndpoints.IPostProcessor<",
+        "FastEndpoints.ICommandMiddleware<",
+        "FastEndpoints.IMapper",
         "FluentValidation.IValidator"
     ];
 
     // ReSharper disable once InconsistentNaming
     readonly StringBuilder b = new();
-    string? _assemblyName;
+    string? _rootNamespace;
 
     public void Initialize(IncrementalGeneratorInitializationContext initCtx)
     {
@@ -41,14 +46,14 @@ public class DiscoveredTypesGenerator : IIncrementalGenerator
         string? Transform(GeneratorSyntaxContext ctx, CancellationToken _)
         {
             //should be re-assigned on every call. do not cache!
-            _assemblyName = ctx.SemanticModel.Compilation.AssemblyName;
+            _rootNamespace = ctx.SemanticModel.Compilation.AssemblyName?.ToValidNameSpace() ?? "Assembly";
 
             return
                 ctx.SemanticModel.GetDeclaredSymbol(ctx.Node) is not ITypeSymbol type ||
                 type.IsAbstract ||
                 type.GetAttributes().Any(a => a.AttributeClass!.Name == DontRegisterAttribute || type.AllInterfaces.Length == 0)
                     ? null
-                    : type.AllInterfaces.Any(i => _whiteList.Contains(i.ToDisplayString()))
+                    : type.AllInterfaces.Any(i => _whiteList.Any(w => i.ToDisplayString().StartsWith(w)))
                         ? type.ToDisplayString()
                         : null;
         }
@@ -69,9 +74,10 @@ public class DiscoveredTypesGenerator : IIncrementalGenerator
             $$"""
               #pragma warning disable CS0618
 
-              namespace {{_assemblyName}};
+              namespace {{_rootNamespace}};
 
               using System;
+              using System.Diagnostics.CodeAnalysis;
 
               public static class DiscoveredTypes
               {
@@ -83,14 +89,21 @@ public class DiscoveredTypesGenerator : IIncrementalGenerator
         {
             b.w(
                 $"""
-                 
-                         typeof({t}),
+
+                         Preserve<{t}>(),
                  """);
         }
         b.w(
             """
-            
+
                 ];
+                
+                // this method instructs the native aot linker to not strip away metadata on a given type
+                static Type Preserve<
+                    [DynamicallyAccessedMembers(
+                        DynamicallyAccessedMemberTypes.PublicConstructors | 
+                        DynamicallyAccessedMemberTypes.PublicMethods | 
+                        DynamicallyAccessedMemberTypes.Interfaces)]T>() => typeof(T);
             }
             """);
 

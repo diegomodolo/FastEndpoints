@@ -1,7 +1,9 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 
 namespace FastEndpoints;
 
+[UnconditionalSuppressMessage("AOT", "IL2026"), UnconditionalSuppressMessage("AOT", "IL3050")]
 public class StreamItem
 {
     /// <summary>event id</summary>

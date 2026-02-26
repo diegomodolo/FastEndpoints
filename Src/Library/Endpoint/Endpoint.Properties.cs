@@ -1,4 +1,5 @@
-﻿using System.Security.Claims;
+﻿using System.Diagnostics.CodeAnalysis;
+using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Hosting;
@@ -8,6 +9,7 @@ using Microsoft.Extensions.Logging;
 
 namespace FastEndpoints;
 
+[UnconditionalSuppressMessage("Trimming", "IL2026"), UnconditionalSuppressMessage("AOT", "IL3050")]
 public abstract partial class Endpoint<TRequest, TResponse> where TRequest : notnull
 {
     //NOTE:
@@ -39,7 +41,7 @@ public abstract partial class Endpoint<TRequest, TResponse> where TRequest : not
     /// <summary>
     /// gives access to the app configuration.
     /// </summary>
-    public IConfiguration Config => _config ??= Cfg.ServiceResolver.Resolve<IConfiguration>();
+    public IConfiguration Config => _config ??= ServiceResolver.Instance.Resolve<IConfiguration>();
 
     /// <summary>
     /// gives access to response sending methods for the endpoint. you can add your own custom response sending methods via extension methods targeting the
@@ -50,17 +52,17 @@ public abstract partial class Endpoint<TRequest, TResponse> where TRequest : not
     /// <summary>
     /// gives access to the hosting environment
     /// </summary>
-    public IWebHostEnvironment Env => _env ??= Cfg.ServiceResolver.Resolve<IWebHostEnvironment>();
+    public IWebHostEnvironment Env => _env ??= ServiceResolver.Instance.Resolve<IWebHostEnvironment>();
 
     /// <summary>
     /// the logger for the current endpoint type
     /// </summary>
-    public ILogger Logger => _logger ??= Cfg.ServiceResolver.Resolve<ILoggerFactory>().CreateLogger(Definition.EndpointType);
+    public ILogger Logger => _logger ??= ServiceResolver.Instance.Resolve<ILoggerFactory>().CreateLogger(Definition.EndpointType);
 
     /// <summary>
     /// the base url of the current request
     /// </summary>
-    public string BaseURL => _baseUrl ??= $"{HttpContext.Request?.Scheme}://{HttpContext.Request?.Host.ToString()}/";
+    public string BaseURL => _baseUrl ??= $"{HttpContext.Request.Scheme}://{HttpContext.Request.Host.ToString()}/";
 
     /// <summary>
     /// the http method of the current request

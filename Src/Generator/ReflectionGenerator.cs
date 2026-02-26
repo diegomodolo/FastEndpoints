@@ -22,7 +22,7 @@ public class ReflectionGenerator : IIncrementalGenerator
 
     readonly StringBuilder b = new();
     readonly StringBuilder _initArgsBuilder = new();
-    string? _assemblyName;
+    string? _rootNamespace;
     TypeCollector _collector = new();
 
     // ReSharper restore InconsistentNaming
@@ -45,7 +45,7 @@ public class ReflectionGenerator : IIncrementalGenerator
         TypeInfo? Transform(GeneratorSyntaxContext ctx, CancellationToken _)
         {
             //should be re-assigned on every call. do not cache!
-            _assemblyName = ctx.SemanticModel.Compilation.AssemblyName;
+            _rootNamespace = ctx.SemanticModel.Compilation.AssemblyName?.ToValidNameSpace() ?? "Assembly";
 
             return ctx.SemanticModel.GetDeclaredSymbol(ctx.Node) is not ITypeSymbol type ||
                    type.IsAbstract ||
@@ -63,10 +63,6 @@ public class ReflectionGenerator : IIncrementalGenerator
 
     string RenderClass()
     {
-        _assemblyName ??= "Assembly"; //when no endpoints are present
-
-        var sanitizedAssemblyName = _assemblyName.Sanitize(string.Empty);
-
         b.Clear().w(
             """
             #pragma warning disable CS0618
@@ -91,17 +87,17 @@ public class ReflectionGenerator : IIncrementalGenerator
         b.w(
             $$"""
 
-              namespace {{_assemblyName}};
+              namespace {{_rootNamespace}};
 
               /// <summary>
-              /// source generated reflection data for request dtos located in the [{{_assemblyName}}] assembly.
+              /// source generated reflection data for request dtos located in the [{{_rootNamespace}}] assembly.
               /// </summary>
               public static class GeneratedReflection
               {
-                  /// <summary>
-                  /// register source generated reflection data from [{{sanitizedAssemblyName}}] with the central cache.
-                  /// </summary>
-                  public static ReflectionCache AddFrom{{sanitizedAssemblyName}}(this ReflectionCache cache)
+              /// <summary>
+              /// register source generated reflection data from [{{_rootNamespace}}] with the central cache.
+              /// </summary>
+              public static ReflectionCache AddFrom{{_rootNamespace!.ToValidIdentifier(string.Empty)}}(this ReflectionCache cache)
                   {
 
               """);
@@ -348,10 +344,13 @@ public class ReflectionGenerator : IIncrementalGenerator
             if (type.DeclaringSyntaxReferences.Length > 0)
                 HashCode = type.DeclaringSyntaxReferences[0].Span.Length;
 
-            if (isEndpoint is false && noRecursion) //treating an endpoint as a regular class to generate its props for property injection support
+            if (!isEndpoint && noRecursion) //treating an endpoint as a regular class to generate its props for property injection support
                 SkipObjectFactory = true;
 
-            if (SkipObjectFactory is false && Properties.Count == 0)
+            if (!SkipObjectFactory && Properties.Count == 0)
+                SkipObjectFactory = true;
+
+            if (type.IsAbstract)
                 SkipObjectFactory = true;
 
             if (Properties.Count > 0)
@@ -366,7 +365,7 @@ public class ReflectionGenerator : IIncrementalGenerator
                 }
             }
 
-            if (isEndpoint && Properties.Count > 0) //create entry for endpoint class to support property injection
+            if (isEndpoint && Properties.Count > 0)                                                    //create entry for endpoint class to support property injection
                 _ = new TypeInfo(ref collector, symbol: symbol, isEndpoint: false, noRecursion: true); //process the endpoint as a regular class without recursion
             else
             {

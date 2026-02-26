@@ -1,10 +1,12 @@
 using System.Collections.Concurrent;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using FluentValidation;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http.Metadata;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Namotion.Reflection;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -37,6 +39,9 @@ public static class Extensions
     /// <param name="options">swagger document configuration options</param>
     public static IServiceCollection SwaggerDocument(this IServiceCollection services, Action<DocumentOptions>? options = null)
     {
+        if (!RuntimeFeature.IsDynamicCodeSupported)
+            return services;
+
         services.AddEndpointsApiExplorer();
         services.AddOpenApiDocument(
             (genSettings, serviceProvider) =>
@@ -104,6 +109,9 @@ public static class Extensions
                                                     Action<OpenApiDocumentMiddlewareSettings>? config = null,
                                                     Action<SwaggerUiSettings>? uiConfig = null)
     {
+        if (!RuntimeFeature.IsDynamicCodeSupported)
+            throw new NotSupportedException("Not supported in AOT applications! Use Scalar for API visualization.");
+
         app.UseOpenApi(config);
         app.UseSwaggerUi((c => c.ConfigureDefaults()) + uiConfig);
 
@@ -472,6 +480,71 @@ public static class Extensions
                     property.ActualSchema.IsNullable(SchemaType.OpenApi3) &&
                     property.ActualSchema.AllOf.Any(schema => schema.Type == JsonObjectType.Array));
         }
+    }
+
+    /// <summary>
+    /// exports swagger.json files to disk (ONLY DURING NATIVE AOT PUBLISHING) and exits the program.
+    /// <para>HINT: make sure to place the call straight after <c>app.UseFastEndpoints()</c></para>
+    /// <para>
+    /// to enable automatic export during AOT publish builds, add this to your .csproj:
+    /// <code>
+    /// &lt;PropertyGroup&gt;
+    ///     &lt;ExportSwaggerDocs&gt;true&lt;/ExportSwaggerDocs&gt;
+    /// &lt;/PropertyGroup&gt;
+    /// </code>
+    /// </para>
+    /// <para>
+    /// to customize the export path, add this to your .csproj:
+    /// <code>
+    /// &lt;PropertyGroup&gt;
+    ///     &lt;SwaggerExportPath&gt;wwwroot/swagger&lt;/SwaggerExportPath&gt;
+    /// &lt;/PropertyGroup&gt;
+    /// </code>
+    /// </para>
+    /// <para>
+    /// to force generate swagger docs outside a AOT publish, run the following in a terminal:
+    /// <code>dotnet run --export-swagger-docs true -p:PublishAot=false</code>
+    /// optionally specify the output folder:
+    /// <code>dotnet run --export-swagger-docs true -p:PublishAot=false -p:SwaggerExportPath=wwwroot/swagger</code>
+    /// </para>
+    /// </summary>
+    /// <param name="documentNames">the swagger document names to export. these must match the names used in <c>.SwaggerDocument()</c> configuration.</param>
+    public static async Task ExportSwaggerDocsAndExitAsync(this WebApplication app, params string[] documentNames)
+    {
+        if (app.Configuration["export-swagger-docs"] != "true")
+            return;
+
+        if (documentNames.Length == 0)
+            return;
+
+        var destinationPath = Path.Combine(app.Environment.ContentRootPath, DocumentOptions.SwaggerExportPath);
+
+        await app.StartAsync();
+
+        var logger = app.Services.GetRequiredService<ILogger<SwaggerExportRunner>>();
+        var generator = app.Services.GetRequiredService<IOpenApiDocumentGenerator>();
+
+        Directory.CreateDirectory(destinationPath);
+
+        foreach (var docName in documentNames)
+        {
+            try
+            {
+                logger.ExportingSwaggerDoc(docName);
+                var doc = await generator.GenerateAsync(docName);
+                var json = doc.ToJson();
+                var filePath = Path.Combine(destinationPath, $"{docName}.json");
+                await File.WriteAllTextAsync(filePath, json);
+                logger.SwaggerDocExportSuccessful(docName, filePath);
+            }
+            catch (Exception ex)
+            {
+                logger.SwaggerDocExportFailed(docName, ex.Message);
+            }
+        }
+
+        await app.StopAsync();
+        Environment.Exit(0);
     }
 
     internal static TValue GetOrAdd<TKey, TValue>(this IDictionary<TKey, TValue> dict, TKey key, TValue value)

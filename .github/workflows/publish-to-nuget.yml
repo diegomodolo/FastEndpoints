@@ -35,10 +35,10 @@ jobs:
           }' > Tests/IntegrationTests/FastEndpoints/xunit.runner.json
 
       - name: Run Tests
-        run: dotnet test FastEndpoints.sln --configuration Release --verbosity minimal --filter "ExcludeInCiCd!=Yes"
+        run: dotnet test FastEndpoints.slnx --configuration Release --verbosity minimal --filter "ExcludeInCiCd!=Yes"
 
       - name: Make Nuget Packages
-        run: dotnet pack -c Release
+        run: dotnet pack FastEndpoints.slnx -c Release
 
       - name: Publish To Nuget
         run: dotnet nuget push "Src/**/*.nupkg" --skip-duplicate -k $NUGET_AUTH_TOKEN -s https://nuget.pkg.github.com/nectar-sistemas/index.json

@@ -224,6 +224,14 @@ public abstract partial class Endpoint<TRequest, TResponse> where TRequest : not
         => Definition.EnableAntiforgery();
 
     /// <summary>
+    /// specify a feature flag to run in order to determine if this endpoint is enabled or disabled for the current request.
+    /// </summary>
+    /// <typeparam name="TFlag">type of the feature flag</typeparam>
+    /// <param name="featureName">optional name of the feature flag</param>
+    protected void FeatureFlag<TFlag>(string? featureName = null) where TFlag : IFeatureFlag
+        => Definition.FeatureFlag<TFlag>(featureName);
+
+    /// <summary>
     /// specify to listen for GET requests on one or more routes.
     /// </summary>
     protected void Get([StringSyntax("Route")] [RouteTemplate] params string[] routePatterns)
@@ -299,6 +307,13 @@ public abstract partial class Endpoint<TRequest, TResponse> where TRequest : not
     /// <param name="options">the idempotency options</param>
     protected void Idempotency(Action<IdempotencyOptions>? options = null)
         => Definition.Idempotency(options);
+
+    /// <summary>
+    /// register metadata objects for the endpoint. these will be auto added to the endpoint metadata collection during startup.
+    /// </summary>
+    /// <param name="metadata"></param>
+    protected void Metadata(params object[] metadata)
+        => Definition.Metadata(metadata);
 
     /// <summary>
     /// specify a custom maximum request body size to be set on <see cref="IHttpMaxRequestBodySizeFeature.MaxRequestBodySize" /> which would apply to this particular
@@ -589,6 +604,7 @@ public abstract partial class Endpoint<TRequest, TResponse> where TRequest : not
     {
         Definition.ThrowIfLocked();
         Definition.SerializerContext = serializerContext;
+        AddCtxToGlobalChain();
     }
 
     /// <summary>
@@ -596,10 +612,24 @@ public abstract partial class Endpoint<TRequest, TResponse> where TRequest : not
     /// the json serializer context will be instantiated with <see cref="SerializerOptions" /> from the UseFastEndpoints(...) call.
     /// </summary>
     /// <typeparam name="TContext">the type of the json serializer context for this endpoint</typeparam>
-    protected void SerializerContext<TContext>() where TContext : JsonSerializerContext
+    protected void SerializerContext<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TContext>()
+        where TContext : JsonSerializerContext
     {
         Definition.ThrowIfLocked();
         Definition.SerializerContext = (TContext?)Activator.CreateInstance(typeof(TContext), new JsonSerializerOptions(Cfg.SerOpts.Options));
+        AddCtxToGlobalChain();
+    }
+
+    void AddCtxToGlobalChain()
+    {
+        if (Definition.SerializerContext is not null)
+        {
+            if (!Cfg.SerOpts.Options.IsReadOnly)
+                Cfg.SerOpts.Options.TypeInfoResolverChain.Insert(0, Definition.SerializerContext);
+
+            if (Cfg.SerOpts.AspNetCoreOptions is { IsReadOnly: false })
+                Cfg.SerOpts.AspNetCoreOptions.TypeInfoResolverChain.Insert(0, Definition.SerializerContext);
+        }
     }
 
     /// <summary>
@@ -710,6 +740,7 @@ public abstract partial class Endpoint<TRequest, TResponse> where TRequest : not
         => Definition.EndpointVersion(version, deprecateAt);
 }
 
+[UnconditionalSuppressMessage("aot", "IL2060"), UnconditionalSuppressMessage("aot", "IL3050")]
 static class ProducesMetaForResultOfResponse
 {
     static readonly MethodInfo _populateMethod =

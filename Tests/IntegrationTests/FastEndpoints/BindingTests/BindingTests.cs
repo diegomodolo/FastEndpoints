@@ -20,7 +20,7 @@ public class BindingTests(Sut App) : TestBase<Sut>
     {
         var (rsp, res) = await App.Client.GETAsync<
                              EmptyRequest,
-                             Response>("/api/test-cases/ep-witout-req-route-binding-test/09809/12", new());
+                             Response>("/api/test-cases/ep-witout-req-route-binding-test/09809/12", EmptyRequest.Instance);
 
         rsp.StatusCode.ShouldBe(HttpStatusCode.OK);
         res.CustomerID.ShouldBe(09809);
@@ -32,7 +32,7 @@ public class BindingTests(Sut App) : TestBase<Sut>
     {
         var (rsp, res) = await App.Client.GETAsync<
                              EmptyRequest,
-                             ErrorResponse>("/api/test-cases/ep-witout-req-route-binding-test/09809/lkjhlkjh", new());
+                             ErrorResponse>("/api/test-cases/ep-witout-req-route-binding-test/09809/lkjhlkjh", EmptyRequest.Instance);
 
         rsp.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
         res.Errors.ShouldNotBeNull();
@@ -525,7 +525,7 @@ public class BindingTests(Sut App) : TestBase<Sut>
         var book = new Book
         {
             BarCodes = new List<int>([1, 2, 3]),
-            CoAuthors = [new Author { Name = "a1" }, new Author { Name = "a2" }],
+            CoAuthors = [new() { Name = "a1" }, new() { Name = "a2" }],
             MainAuthor = new() { Name = "main" }
         };
 
@@ -648,7 +648,7 @@ public class BindingTests(Sut App) : TestBase<Sut>
     {
         var (rsp, res) = await App.CustomerClient.GETAsync<EmptyRequest, ErrorResponse>(
                              "/api/sales/orders/retrieve/54321",
-                             new());
+                             EmptyRequest.Instance);
 
         rsp.StatusCode.ShouldBe(HttpStatusCode.OK);
         res.Message.ShouldBe("ok!");
@@ -667,7 +667,7 @@ public class BindingTests(Sut App) : TestBase<Sut>
                              "&guids=[\"b01ec302-0adc-4a2b-973d-bbfe639ed9a5\",\"e08664a4-efd8-4062-a1e1-6169c6eac2ab\"]" +
                              "&ints=[1,2,3]" +
                              "&floaty=3.2",
-                             new());
+                             EmptyRequest.Instance);
 
         rsp.StatusCode.ShouldBe(HttpStatusCode.OK);
         res.CustomerID.ShouldBe(09809);
@@ -686,7 +686,7 @@ public class BindingTests(Sut App) : TestBase<Sut>
     {
         var (rsp, res) = await App.GuestClient.GETAsync<
                              EmptyRequest,
-                             ErrorResponse>("/api/test-cases/ep-witout-req-query-param-binding-test?customerId=09809&otherId=lkjhlkjh", new());
+                             ErrorResponse>("/api/test-cases/ep-witout-req-query-param-binding-test?customerId=09809&otherId=lkjhlkjh", EmptyRequest.Instance);
 
         rsp.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
         res.Errors.ShouldContainKey("otherId");
@@ -789,5 +789,45 @@ public class BindingTests(Sut App) : TestBase<Sut>
 
         var res = await rsp.Content.ReadAsStringAsync(Cancellation);
         res.ShouldBe("123 - test");
+    }
+
+    [Fact]
+    public async Task FromCookieAttributeBindingPass()
+    {
+        var id = Guid.NewGuid();
+        var ck = Guid.NewGuid().ToString();
+        var req = new TestCases.FromCookieRequestBindingTest.Request
+        {
+            Id = id,
+            SomeCookie = ck
+        };
+
+        var (rsp, res) = await App.GuestClient.POSTAsync<
+                             TestCases.FromCookieRequestBindingTest.Endpoint,
+                             TestCases.FromCookieRequestBindingTest.Request,
+                             TestCases.FromCookieRequestBindingTest.Response>(req);
+        rsp.IsSuccessStatusCode.ShouldBeTrue();
+        res.Id.ShouldBe(id);
+        res.CookieValue.ShouldBe(ck);
+    }
+
+    [Fact]
+    public async Task FromCookieAttributeBindingFail()
+    {
+        var id = Guid.NewGuid();
+        var ck = Guid.NewGuid().ToString();
+        var req = new TestCases.FromCookieRequestBindingTest.Request
+        {
+            Id = id,
+            SomeCookie = ck
+        };
+
+        var (rsp, res) = await App.GuestClient.POSTAsync<
+                             TestCases.FromCookieRequestBindingTest.Endpoint,
+                             TestCases.FromCookieRequestBindingTest.Request,
+                             ErrorResponse>(req, populateCookies: false);
+        rsp.IsSuccessStatusCode.ShouldBeFalse();
+        res.Errors.Count.ShouldBe(1);
+        res.Errors.Keys.Contains(nameof(TestCases.FromCookieRequestBindingTest.Request.SomeCookie));
     }
 }
